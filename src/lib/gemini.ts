@@ -117,12 +117,7 @@ export async function generateVideoVeo(prompt: string, aspectRatio: string = "16
 
   let operation = await ai.models.generateVideos(params);
 
-  const MAX_WAIT_MS = 10 * 60 * 1000; // 10 minutes
-  const startedAt = Date.now();
   while (!operation.done) {
-    if (Date.now() - startedAt > MAX_WAIT_MS) {
-      throw new Error("Video generation timed out after 10 minutes");
-    }
     await new Promise(resolve => setTimeout(resolve, 10000));
     operation = await ai.operations.getVideosOperation({operation});
   }
