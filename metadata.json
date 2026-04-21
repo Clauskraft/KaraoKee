@@ -1,0 +1,6 @@
+{
+  "name": "K-Studio Pro: AI Karaoke Editor",
+  "description": "En avanceret karaoke-editor med Gemini-drevet tekstudtrækning, AI-baggrundsgenerering, Google Photos integration og YouTube-støtte.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
