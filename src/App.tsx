@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactPlayer from 'react-player';
 import { get, set } from 'idb-keyval';
-const Player = ReactPlayer as any;
+// Narrow cast: ReactPlayer's forwarded-ref type is incompatible with JSX directly; widen just enough to use it
+const Player = ReactPlayer as unknown as React.ComponentType<Record<string, unknown>>;
 
 import { 
   Play, Pause, ArrowRight, RotateCcw, MonitorPlay, 
@@ -30,6 +31,44 @@ interface MediaInfo {
   isYoutube?: boolean;
   file?: File;
   loop?: boolean;
+}
+
+interface GooglePhotoItem {
+  id: string;
+  baseUrl: string;
+  mimeType: string;
+  filename?: string;
+}
+
+/** Minimal subset of react-player's instance API used in this app */
+interface PlayerInstance {
+  getCurrentTime: () => number;
+  seekTo: (seconds: number) => void;
+}
+
+interface StudioViewProps {
+  sourceMedia: MediaInfo | null;
+  setSourceMedia: React.Dispatch<React.SetStateAction<MediaInfo | null>>;
+  bgMediaList: MediaInfo[];
+  setBgMediaList: React.Dispatch<React.SetStateAction<MediaInfo[]>>;
+  lyricsRaw: string;
+  setLyricsRaw: React.Dispatch<React.SetStateAction<string>>;
+  onNext: () => void;
+}
+
+interface SyncViewProps {
+  sourceMedia: MediaInfo | null;
+  lyrics: LyricLine[];
+  setLyrics: React.Dispatch<React.SetStateAction<LyricLine[]>>;
+  onNext: () => void;
+  onBack: () => void;
+}
+
+interface PreviewViewProps {
+  sourceMedia: MediaInfo | null;
+  bgMediaList: MediaInfo[];
+  lyrics: LyricLine[];
+  onBack: () => void;
 }
 
 export default function App() {
@@ -81,9 +120,9 @@ export default function App() {
         newSourceMedia.url = URL.createObjectURL(newSourceMedia.file);
       }
       
-      const newBgMediaList = (projectData.bgMediaList || []).map((m: any) => {
+      const newBgMediaList: MediaInfo[] = (projectData.bgMediaList || []).map((m: MediaInfo) => {
         if (m.file) {
-           m.url = URL.createObjectURL(m.file);
+          return { ...m, url: URL.createObjectURL(m.file) };
         }
         return m;
       });
@@ -195,7 +234,7 @@ export default function App() {
 // ----------------------------------------------------------------------
 // 1. STUDIO VIEW (Ai Generation, Uploads, Extraction)
 // ----------------------------------------------------------------------
-function StudioView({ sourceMedia, setSourceMedia, bgMediaList, setBgMediaList, lyricsRaw, setLyricsRaw, onNext }: any) {
+function StudioView({ sourceMedia, setSourceMedia, bgMediaList, setBgMediaList, lyricsRaw, setLyricsRaw, onNext }: StudioViewProps) {
   const [analyzingAudio, setAnalyzingAudio] = useState(false);
   const [aiBgMode, setAiBgMode] = useState<'upload' | 'image' | 'video' | 'photos'>('upload');
   const [ytUrl, setYtUrl] = useState('');
@@ -205,7 +244,7 @@ function StudioView({ sourceMedia, setSourceMedia, bgMediaList, setBgMediaList, 
   // Google Photos Modal & State
   const [googleToken, setGoogleToken] = useState<string | null>(null);
   const [showPhotos, setShowPhotos] = useState(false);
-  const [photos, setPhotos] = useState<any[]>([]);
+  const [photos, setPhotos] = useState<GooglePhotoItem[]>([]);
   const [photosNextPageToken, setPhotosNextPageToken] = useState<string | null>(null);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [fetchingMore, setFetchingMore] = useState(false);
@@ -264,16 +303,16 @@ function StudioView({ sourceMedia, setSourceMedia, bgMediaList, setBgMediaList, 
         file,
         loop: defaultLoop
       }));
-      setBgMediaList((prev: any) => [...prev, ...newMedia]);
+      setBgMediaList(prev => [...prev, ...newMedia]);
     }
   };
 
   const toggleLoop = (index: number) => {
-    setBgMediaList((prev: any) => prev.map((m: any, i: number) => i === index ? { ...m, loop: !m.loop } : m));
+    setBgMediaList(prev => prev.map((m, i) => i === index ? { ...m, loop: !m.loop } : m));
   };
 
   const moveBg = (index: number, direction: 'up' | 'down') => {
-    setBgMediaList((prev: any) => {
+    setBgMediaList(prev => {
       const newList = [...prev];
       const targetIndex = direction === 'up' ? index - 1 : index + 1;
       if (targetIndex < 0 || targetIndex >= newList.length) return prev;
@@ -285,7 +324,7 @@ function StudioView({ sourceMedia, setSourceMedia, bgMediaList, setBgMediaList, 
   };
 
   const removeBg = (index: number) => {
-    setBgMediaList((prev: any) => prev.filter((_: any, i: number) => i !== index));
+    setBgMediaList(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleGooglePhotosAuth = async () => {
@@ -313,6 +352,7 @@ function StudioView({ sourceMedia, setSourceMedia, bgMediaList, setBgMediaList, 
       
       // 3. Fallback: Lyt på postMessage HVIS popupen alligevel tillader det
       const handleMsg = async (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return;
         if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
           console.log("Fik success token fra popup postMessage!");
           const tokens = event.data.tokens;
@@ -385,10 +425,9 @@ function StudioView({ sourceMedia, setSourceMedia, bgMediaList, setBgMediaList, 
     }
   };
 
-  const addPhotoAsBg = (photo: any) => {
-    // Google Photos media items provide a baseUrl. We can append parameters like =w2048 to get high res.
+  const addPhotoAsBg = (photo: GooglePhotoItem) => {
     const isVideo = photo.mimeType.startsWith('video/');
-    setBgMediaList((prev: any) => [...prev, {
+    setBgMediaList(prev => [...prev, {
       url: photo.baseUrl + (isVideo ? '=dv' : '=w1080'),
       isVideo,
       loop: defaultLoop
@@ -464,10 +503,10 @@ Do not use Markdown formatting blocks like \`\`\`json. Return only the array, e.
       
       let newOrder: number[] = [];
       try {
-        const cleaned = mappingResult.replace(/```json|```/g, '').trim();
+        const cleaned = mappingResult?.replace(/```json|```/g, '').trim() ?? '';
         newOrder = JSON.parse(cleaned);
       } catch (e) {
-        // Fallback: use existing order if AI fails
+        console.warn("AI storyboard JSON parse failed, falling back to original order:", e);
         newOrder = bgMediaList.map((_, i) => i);
       }
       
@@ -524,10 +563,10 @@ Do not use Markdown formatting blocks like \`\`\`json. Return only the array, e.
 
         if (aiBgMode === 'image') {
           const imgUrl = await generateImage(enhancedPrompt, aspectRatio);
-          if (imgUrl) setBgMediaList((prev: any) => [...prev, { url: imgUrl, isVideo: false, loop: true }]);
+          if (imgUrl) setBgMediaList(prev => [...prev, { url: imgUrl, isVideo: false, loop: true }]);
         } else if (aiBgMode === 'video') {
           const vidUrl = await generateVideoVeo(enhancedPrompt, aspectRatio);
-          if (vidUrl) setBgMediaList((prev: any) => [...prev, { url: vidUrl, isVideo: true, loop: defaultLoop }]);
+          if (vidUrl) setBgMediaList(prev => [...prev, { url: vidUrl, isVideo: true, loop: defaultLoop }]);
         }
         setGenerationProgress(batchProgressBase + progressPerItem);
       }
@@ -560,7 +599,7 @@ Do not use Markdown formatting blocks like \`\`\`json. Return only the array, e.
           setGenerationStatus(batchSize > 1 ? `Genererer billede ${i+1} af ${batchSize}...` : 'Genererer billede...');
           const variedPrompt = batchSize > 1 ? `${enhancedPrompt}. variation ${i+1}` : enhancedPrompt;
           const imgUrl = await generateImage(variedPrompt, aspectRatio);
-          if (imgUrl) setBgMediaList((prev: any) => [...prev, { url: imgUrl, isVideo: false, loop: true }]);
+          if (imgUrl) setBgMediaList(prev => [...prev, { url: imgUrl, isVideo: false, loop: true }]);
           setGenerationProgress(batchProgressBase + progressPerItem);
         } else if (aiBgMode === 'video') {
            setGenerationStatus(batchSize > 1 ? `Genererer video ${i+1} af ${batchSize} (Veo)...` : 'Genererer video (Veo)...');
@@ -588,7 +627,7 @@ Do not use Markdown formatting blocks like \`\`\`json. Return only the array, e.
            const variedPrompt = batchSize > 1 ? `${enhancedPrompt}. variation ${i+1}` : enhancedPrompt;
            const vidUrl = await generateVideoVeo(variedPrompt, aspectRatio, initImageStr, initImageMime);
            clearInterval(interval);
-           if (vidUrl) setBgMediaList((prev: any) => [...prev, { url: vidUrl, isVideo: true, loop: defaultLoop }]);
+           if (vidUrl) setBgMediaList(prev => [...prev, { url: vidUrl, isVideo: true, loop: defaultLoop }]);
            setGenerationProgress(batchProgressBase + progressPerItem);
         }
       }
@@ -744,7 +783,7 @@ Do not use Markdown formatting blocks like \`\`\`json. Return only the array, e.
                            </div>
                         ) : photos.length > 0 ? (
                            <>
-                              {photos.map((p: any) => (
+                              {photos.map(p => (
                                  <button key={p.id} onClick={() => addPhotoAsBg(p)} className="aspect-square rounded-lg overflow-hidden border border-white/10 hover:border-orange-500 transition-all relative group">
                                     <img src={p.baseUrl + "=w100-h100-c"} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" referrerPolicy="no-referrer" />
                                     {p.mimeType.startsWith('video/') && <Video className="absolute bottom-1 right-1 w-3 h-3 text-white shadow-lg" />}
@@ -973,34 +1012,34 @@ Do not use Markdown formatting blocks like \`\`\`json. Return only the array, e.
 // ----------------------------------------------------------------------
 // 2. SYNC VIEW
 // ----------------------------------------------------------------------
-function SyncView({ sourceMedia, lyrics, setLyrics, onNext, onBack }: any) {
-   const playerRef = useRef<any>(null);
+function SyncView({ sourceMedia, lyrics, setLyrics, onNext, onBack }: SyncViewProps) {
+   const playerRef = useRef<PlayerInstance | null>(null);
    const [currentTime, setCurrentTime] = useState(0);
    const [isPlaying, setIsPlaying] = useState(false);
    const [activeIndex, setActiveIndex] = useState(0);
    const [isAutoSyncing, setIsAutoSyncing] = useState(false);
 
-   const handleProgress = (state: any) => {
+   const handleProgress = (state: { playedSeconds: number }) => {
       setCurrentTime(state.playedSeconds);
    };
 
    const handleMarkStart = () => {
       if (activeIndex >= lyrics.length || !playerRef.current) return;
-      const time = typeof playerRef.current.getCurrentTime === 'function' ? playerRef.current.getCurrentTime() : currentTime;
-      setLyrics((prev: LyricLine[]) => prev.map((l, i) => i === activeIndex ? { ...l, startTime: time } : l));
+      const time = playerRef.current.getCurrentTime();
+      setLyrics(prev => prev.map((l, i) => i === activeIndex ? { ...l, startTime: time } : l));
    };
 
    const handleMarkEnd = () => {
       if (activeIndex >= lyrics.length || !playerRef.current) return;
-      const time = typeof playerRef.current.getCurrentTime === 'function' ? playerRef.current.getCurrentTime() : currentTime;
-      setLyrics((prev: LyricLine[]) => prev.map((l, i) => i === activeIndex ? { ...l, endTime: time } : l));
+      const time = playerRef.current.getCurrentTime();
+      setLyrics(prev => prev.map((l, i) => i === activeIndex ? { ...l, endTime: time } : l));
       setActiveIndex((i: number) => i + 1);
    };
 
    const restart = () => {
       setActiveIndex(0);
-      setLyrics((prev: LyricLine[]) => prev.map(l => ({ ...l, startTime: null, endTime: null })));
-      if (playerRef.current && typeof playerRef.current.seekTo === 'function') {
+      setLyrics(prev => prev.map(l => ({ ...l, startTime: null, endTime: null })));
+      if (playerRef.current) {
          playerRef.current.seekTo(0);
          setIsPlaying(false);
       }
@@ -1017,22 +1056,21 @@ function SyncView({ sourceMedia, lyrics, setLyrics, onNext, onBack }: any) {
 
       try {
          const base64 = await fileToBase64(sourceMedia.file);
-         const lyricsText = lyrics.map((l: any) => l.text).join('\n');
+         const lyricsText = lyrics.map(l => l.text).join('\n');
          
          const payload = { base64, mimeType: sourceMedia.file.type };
          const resultRaw = await autoSyncLyrics(payload, lyricsText);
-         
+         if (!resultRaw) throw new Error("Tomt respons fra AI.");
+
          const cleaned = resultRaw.replace(/```json|```/g, '').trim();
-         const resultJson = JSON.parse(cleaned);
+         const resultJson: { startTime: number; endTime: number }[] = JSON.parse(cleaned);
 
          if (Array.isArray(resultJson) && resultJson.length > 0) {
-            setLyrics((prev: LyricLine[]) => {
+            setLyrics(prev => {
                const newLyrics = [...prev];
-               resultJson.forEach((aiLine: any, idx: number) => {
+               resultJson.forEach((aiLine, idx) => {
                   if (idx < newLyrics.length) {
-                     newLyrics[idx].startTime = aiLine.startTime;
-                     newLyrics[idx].endTime = aiLine.endTime;
-                     // Keep the original text structure from state or use the returned one if slightly formatted
+                     newLyrics[idx] = { ...newLyrics[idx], startTime: aiLine.startTime, endTime: aiLine.endTime };
                   }
                });
                return newLyrics;
@@ -1186,8 +1224,8 @@ function SyncView({ sourceMedia, lyrics, setLyrics, onNext, onBack }: any) {
 // ----------------------------------------------------------------------
 // 3. PREVIEW VIEW
 // ----------------------------------------------------------------------
-function PreviewView({ sourceMedia, bgMediaList, lyrics, onBack }: any) {
-   const playerRef = useRef<any>(null);
+function PreviewView({ sourceMedia, bgMediaList, lyrics, onBack }: PreviewViewProps) {
+   const playerRef = useRef<PlayerInstance | null>(null);
    const bgRef = useRef<HTMLVideoElement>(null);
    const canvasRef = useRef<HTMLCanvasElement>(null);
    const fxWrapperRef = useRef<HTMLDivElement>(null);
@@ -1201,7 +1239,7 @@ function PreviewView({ sourceMedia, bgMediaList, lyrics, onBack }: any) {
    const [duration, setDuration] = useState(1); // will update once player loads
    const [bgIndex, setBgIndex] = useState(0);
 
-   const handleProgress = (state: any) => {
+   const handleProgress = (state: { playedSeconds: number }) => {
       setTime(state.playedSeconds);
    };
 
@@ -1281,7 +1319,7 @@ function PreviewView({ sourceMedia, bgMediaList, lyrics, onBack }: any) {
    useEffect(() => {
       if (bgMediaList.length <= 1 || duration <= 0) return;
       
-      const syncedLyrics = lyrics.filter((l: any) => l.startTime !== null);
+      const syncedLyrics = lyrics.filter(l => l.startTime !== null);
       if (syncedLyrics.length === 0) {
          const step = duration / bgMediaList.length;
          const index = Math.min(bgMediaList.length - 1, Math.floor(time / step));

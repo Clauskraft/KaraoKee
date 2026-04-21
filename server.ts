@@ -20,8 +20,24 @@ async function startServer() {
   const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
   const SCOPES = ["https://www.googleapis.com/auth/photoslibrary.readonly"];
   
-  // Im-memory token store for iframe polling
-  const tokenStore: Record<string, any> = {};
+  // In-memory token store with TTL expiry to prevent unbounded memory growth
+  const TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  const tokenStore: Record<string, { value: any; expiresAt: number }> = {};
+  const storeToken = (key: string, value: any) => {
+    tokenStore[key] = { value, expiresAt: Date.now() + TOKEN_TTL_MS };
+  };
+  const getToken = (key: string): any | null => {
+    const entry = tokenStore[key];
+    if (!entry || Date.now() > entry.expiresAt) { delete tokenStore[key]; return null; }
+    return entry.value;
+  };
+  // Periodic cleanup of expired entries
+  setInterval(() => {
+    const now = Date.now();
+    for (const key of Object.keys(tokenStore)) {
+      if (now > tokenStore[key].expiresAt) delete tokenStore[key];
+    }
+  }, 5 * 60 * 1000);
 
   // 1. Get Auth URL
   app.get("/api/auth/google/url", (req, res) => {
@@ -36,13 +52,11 @@ async function startServer() {
     
     const stateId = (req.query.state as string) || Math.random().toString(36).substring(7);
 
-    // Brug browserens udregnede origin for at garantere et 100% match!
-    const clientOrigin = req.query.origin as string;
-    const appUrl = clientOrigin || process.env.APP_URL || `https://${req.header('x-forwarded-host') || req.headers.host}`;
+    // Derive redirect URI from trusted server-side sources only (never trust client-provided origin)
+    const appUrl = process.env.APP_URL || `https://${req.header('x-forwarded-host') || req.headers.host}`;
     const redirectUri = `${appUrl}/auth/callback`;
-    
-    // Gem redirectUri i memory, så callback altid bytter den korrekte med google!
-    tokenStore[`uri_${stateId}`] = redirectUri;
+
+    storeToken(`uri_${stateId}`, redirectUri);
 
     const params = new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
@@ -65,7 +79,7 @@ async function startServer() {
 
     const stateStr = state as string;
     // Hent den gemte præcise redirectUri for at undgå mismatch
-    const redirectUri = tokenStore[`uri_${stateStr}`] || (process.env.APP_URL || `https://${req.header('x-forwarded-host') || req.headers.host}`) + "/auth/callback";
+    const redirectUri = getToken(`uri_${stateStr}`) || (process.env.APP_URL || `https://${req.header('x-forwarded-host') || req.headers.host}`) + "/auth/callback";
 
     try {
       const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -88,23 +102,27 @@ async function startServer() {
 
       // 3. Store tokens in-memory by state key
       if (state && typeof state === 'string') {
-        tokenStore[state] = tokens;
+        storeToken(state, tokens);
       }
 
-      // Send the access token back to the app via postMessage and localStorage fallback (Legacy support, but backend state is primary now)
+      // Escape forward-slashes to prevent </script> injection when embedding JSON in a script block
+      const safeTokensJson = JSON.stringify(tokens).replace(/\//g, '\\/');
       res.send(`
         <html>
           <body>
             <script>
-              localStorage.setItem('google_photos_token', '${tokens.access_token}');
-              if (window.opener) {
-                window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', tokens: ${JSON.stringify(tokens)} }, '*');
-              }
-              setTimeout(() => {
-                document.body.innerHTML = "Godkendt! Du kan lukke dette vindue nu.";
-                window.close();
-              }, 500);
-            </script>
+              (function() {
+                var data = ${safeTokensJson};
+                localStorage.setItem('google_photos_token', data.access_token);
+                if (window.opener) {
+                  window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', tokens: data }, window.location.origin);
+                }
+                setTimeout(function() {
+                  document.body.textContent = "Godkendt! Du kan lukke dette vindue nu.";
+                  window.close();
+                }, 500);
+              })();
+            <\/script>
             <p>Authentication successful. You can close this window.</p>
           </body>
         </html>
@@ -117,10 +135,12 @@ async function startServer() {
   // Fetch token by state
   app.get("/api/auth/token", (req, res) => {
     const state = req.query.state as string;
-    if (state && tokenStore[state]) {
-      const tokens = tokenStore[state];
-      delete tokenStore[state]; // Extract and clean up immediately
-      return res.json({ tokens });
+    if (state) {
+      const tokens = getToken(state);
+      if (tokens) {
+        delete tokenStore[state];
+        return res.json({ tokens });
+      }
     }
     return res.json({ tokens: null });
   });
