@@ -165,7 +165,7 @@ export default function App() {
           )}
 
           {activeTab === 'sync' && (
-            <motion.div key="sync" initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}} className="flex-1 h-full">
+            <motion.div key="sync" initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}} className="flex-1 flex flex-col min-h-0">
               <SyncView 
                  sourceMedia={sourceMedia}
                  lyrics={lyrics}
@@ -1051,7 +1051,7 @@ function SyncView({ sourceMedia, lyrics, setLyrics, onNext, onBack }: any) {
    };
 
    return (
-      <div className="flex flex-col lg:flex-row gap-8 h-full">
+      <div className="flex flex-col lg:flex-row gap-8 flex-1 min-h-0">
          {/* Player & Controls */}
          <div className="w-full lg:w-5/12 flex flex-col gap-6 h-[40vh] lg:h-auto">
             <div className="relative flex-1 bg-black rounded-3xl border border-white/10 overflow-hidden shadow-[0_20px_40px_rgba(0,0,0,0.5)] flex flex-col group">
@@ -1092,7 +1092,7 @@ function SyncView({ sourceMedia, lyrics, setLyrics, onNext, onBack }: any) {
          </div>
 
          {/* Sync Details */}
-         <div className="w-full lg:w-7/12 flex flex-col h-full bg-[#0a0a0a] rounded-3xl border border-white/5 p-6 lg:p-10 shadow-2xl">
+         <div className="w-full lg:w-7/12 flex flex-col min-h-0 bg-[#0a0a0a] rounded-3xl border border-white/5 p-6 lg:p-10 shadow-2xl">
             <div className="flex justify-between items-center mb-8">
                <h2 className="text-2xl font-light tracking-tight flex items-center gap-3">
                   <AlignLeft className="w-6 h-6 text-orange-500" /> Lyrik Tidslinje
