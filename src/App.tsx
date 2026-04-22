@@ -1440,14 +1440,16 @@ function PreviewView({ sourceMedia, bgMediaList, lyrics, onBack }: any) {
 
             {/* Audio Source (Background layer) */}
             <div className="hidden">
-               <Player 
-                  ref={playerRef}
-                  url={sourceMedia.url}
-                  playing={isPlaying}
-                  onProgress={handleProgress}
-                  onReady={(player: any) => setDuration(player.getDuration())}
-                  onEnded={() => setIsPlaying(false)}
-               />
+               {sourceMedia?.url && (
+                  <Player
+                     ref={playerRef}
+                     url={sourceMedia.url}
+                     playing={isPlaying}
+                     onProgress={handleProgress}
+                     onReady={(player: any) => setDuration(player.getDuration())}
+                     onEnded={() => setIsPlaying(false)}
+                  />
+               )}
             </div>
 
             {/* Lyrics OVERLAY - Cinematic rendering */}
